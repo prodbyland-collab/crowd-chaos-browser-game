@@ -68,7 +68,7 @@ function App() {
   const [popups, setPopups] = useState([]);
   const [chatText, setChatText] = useState('');
   const [theme, setTheme] = useState('violet');
-  const [notice, setNotice] = useState('Waiting for the crowd to cause trouble...');
+  const [notice, setNotice] = useState('Waiting for the room to vote on shared browser chaos...');
 
   useEffect(() => {
     const ws = new WebSocket(connectUrl());
@@ -230,7 +230,7 @@ function App() {
             </div>
           </div>
           <p className="intro">
-            One player pilots a simulated browser while the crowd votes every few seconds to mess with it in real time.
+            Join a private room where everyone votes every few seconds to mess with one shared safe browser.
           </p>
           <div className="entry-grid">
             <label>
@@ -245,7 +245,7 @@ function App() {
               <input value={joinCode} onChange={(event) => setJoinCode(event.target.value.toUpperCase())} placeholder="A7K9Q" />
             </label>
             <button className="secondary" onClick={joinRoom} disabled={!connected || !joinCode.trim()}>
-              <Users size={18} /> Join crowd
+              <Users size={18} /> Join room
             </button>
           </div>
           <div className="status-line">
@@ -329,7 +329,7 @@ function SandboxControl({ room, userId, role, clock, grantControl, revokeControl
   return (
     <div className="sandbox-panel">
       <div className="panel-title"><ShieldCheck size={18} /> Safe sandbox</div>
-      <p className="microcopy">Public allowlist only. No personal browser, cookies, forms, scripts, or saved sessions.</p>
+      <p className="microcopy">One public browser per private room. Everyone can vote on safe shared actions.</p>
 
       <div className="control-status">
         <Globe2 size={16} />
@@ -374,13 +374,13 @@ function SandboxControl({ room, userId, role, clock, grantControl, revokeControl
           ? `${room.sandbox.controllerName} controls the sandbox for ${controlSeconds}s.`
           : isHost
             ? 'Host can browse or grant a 30 second control pass.'
-            : 'Ask the host for a sandbox control pass.'}
+            : 'Vote actions are open to everyone; direct control still needs a host pass.'}
       </small>
     </div>
   );
 }
 
-function VotePanel({ room, role, clock, vote }) {
+function VotePanel({ room, clock, vote }) {
   const secondsLeft = Math.max(0, Math.ceil((room.voteEndsAt - clock) / 1000));
   const total = Object.values(room.voteCounts).reduce((sum, count) => sum + count, 0) || 1;
   return (
@@ -390,7 +390,7 @@ function VotePanel({ room, role, clock, vote }) {
         {room.actions.map((action) => {
           const count = room.voteCounts[action.id] || 0;
           return (
-            <button key={action.id} className="vote-action" onClick={() => vote(action.id)} disabled={role !== 'crowd'}>
+            <button key={action.id} className="vote-action" onClick={() => vote(action.id)}>
               <span>{action.label}</span>
               <small>{count} votes</small>
               <i style={{ width: `${(count / total) * 100}%` }} />
@@ -463,7 +463,7 @@ function FakeBrowser({ tabs, activeTab, setActiveTab, closeActiveTab, urlValue, 
           <div className="fake-terminal">
             <p>$ crowdctl vote --target browser</p>
             <p>majority action pending... role={role}</p>
-            <p>rendering safe fake chaos inside viewport</p>
+            <p>shared public sandbox accepts room votes from every user</p>
           </div>
         </div>
         {popups.map((popup) => (
@@ -474,7 +474,7 @@ function FakeBrowser({ tabs, activeTab, setActiveTab, closeActiveTab, urlValue, 
           </div>
         ))}
       </div>
-      <div className="freeze-screen"><Bot size={48} /><span>Frozen by crowd vote</span></div>
+      <div className="freeze-screen"><Bot size={48} /><span>Frozen by room vote</span></div>
     </div>
   );
 }

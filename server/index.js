@@ -18,7 +18,13 @@ const ACTIONS = [
   { id: 'shake', label: 'Shake window' },
   { id: 'freeze', label: 'Freeze screen' },
   { id: 'theme', label: 'Change theme' },
-  { id: 'popup', label: 'Popup storm' }
+  { id: 'popup', label: 'Popup storm' },
+  { id: 'public-scroll-down', label: 'Public browser scroll down' },
+  { id: 'public-scroll-up', label: 'Public browser scroll up' },
+  { id: 'public-wikipedia', label: 'Public browser: Wikipedia' },
+  { id: 'public-nasa', label: 'Public browser: NASA' },
+  { id: 'public-mdn', label: 'Public browser: MDN' },
+  { id: 'public-map', label: 'Public browser: OpenStreetMap' }
 ];
 
 const SAFE_SITES = [
@@ -176,6 +182,7 @@ function scheduleVote(room) {
   room.voteTimer = setTimeout(() => {
     const action = winningAction(room);
     const actionMeta = ACTIONS.find((item) => item.id === action);
+    executeVotedAction(room, action);
     room.lastResult = {
       id: action,
       label: actionMeta?.label || action,
@@ -188,6 +195,31 @@ function scheduleVote(room) {
     scheduleVote(room);
     sync(room);
   }, VOTE_SECONDS * 1000);
+}
+
+function executeVotedAction(room, action) {
+  const siteByAction = {
+    'public-wikipedia': 'wikipedia',
+    'public-nasa': 'nasa',
+    'public-mdn': 'mdn',
+    'public-map': 'openstreetmap'
+  };
+
+  if (action === 'public-scroll-down') {
+    room.sandbox.scrollY = Math.min(1800, room.sandbox.scrollY + 420);
+  }
+
+  if (action === 'public-scroll-up') {
+    room.sandbox.scrollY = Math.max(0, room.sandbox.scrollY - 420);
+  }
+
+  if (siteByAction[action]) {
+    const site = safeSiteFor(siteByAction[action]);
+    room.sandbox.siteId = site.id;
+    room.sandbox.url = site.url;
+    room.sandbox.title = site.title;
+    room.sandbox.scrollY = 0;
+  }
 }
 
 function scheduleSystemEvent(room) {
@@ -310,7 +342,7 @@ wss.on('connection', (ws) => {
     }
 
     if (message.type === 'vote') {
-      if (currentRoom.users.get(userId)?.role !== 'crowd') return;
+      if (!currentRoom.users.has(userId)) return;
       if (ACTIONS.some((action) => action.id === message.actionId)) {
         currentRoom.votes.set(userId, message.actionId);
         sync(currentRoom);

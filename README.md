@@ -7,8 +7,10 @@ A fake browser simulation party game where one host plays the browser and the cr
 - Room creation and join-by-code
 - Host/player and crowd roles
 - Simulated browser chrome with tabs, URL field, cursor, page content, and smooth scrolling
-- WebSocket voting rounds every 8 seconds
+- WebSocket voting rounds every 8 seconds, open to every user in the room
 - Majority chaos actions: scroll, tabs, fake typing, glitch, shake, freeze, theme shifts, popup spam
+- One shared public sandbox browser per private room
+- Vote-driven public browser navigation and scrolling
 - Automatic random system events every 20-40 seconds
 - Real-time chat with emoji-friendly messages
 - Safe shared sandbox browser with allowlisted public internet pages
@@ -24,6 +26,7 @@ The app never controls a user's real browser, tabs, cookies, extensions, passwor
 - fetched pages are rendered through `/sandbox`
 - scripts, forms, frames, arbitrary navigation, and storage are blocked
 - crowd control must be granted by the host and expires automatically
+- every room member can vote on shared browser actions
 
 ## Run Locally
 
