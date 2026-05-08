@@ -21,6 +21,15 @@ const ACTIONS = [
   { id: 'popup', label: 'Popup storm' }
 ];
 
+const SAFE_SITES = [
+  { id: 'example', title: 'Example Domain', url: 'https://example.com' },
+  { id: 'wikipedia', title: 'Wikipedia Main Page', url: 'https://www.wikipedia.org' },
+  { id: 'nasa', title: 'NASA', url: 'https://www.nasa.gov' },
+  { id: 'mdn', title: 'MDN Web Docs', url: 'https://developer.mozilla.org' },
+  { id: 'openstreetmap', title: 'OpenStreetMap', url: 'https://www.openstreetmap.org' },
+  { id: 'archive', title: 'Internet Archive', url: 'https://archive.org' }
+];
+
 const SYSTEM_EVENTS = [
   'System lag detected',
   'Random tab appeared',
@@ -39,6 +48,39 @@ const wss = new WebSocketServer({ server });
 
 app.use(express.static(join(__dirname, '..', 'dist')));
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/sandbox', async (req, res) => {
+  const site = safeSiteFor(req.query.site);
+  if (!site) {
+    res.status(403).send('<h1>Destination blocked</h1><p>This sandbox only opens allowlisted public pages.</p>');
+    return;
+  }
+
+  try {
+    const response = await fetch(site.url, {
+      headers: {
+        'User-Agent': 'CrowdChaosSandbox/1.0',
+        Accept: 'text/html,application/xhtml+xml'
+      },
+      redirect: 'follow'
+    });
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('text/html')) {
+      res.status(415).send('<h1>Preview unavailable</h1><p>The sandbox only previews HTML pages.</p>');
+      return;
+    }
+
+    const html = await response.text();
+    res
+      .setHeader(
+        'Content-Security-Policy',
+        "default-src 'none'; img-src https: data:; style-src https: 'unsafe-inline'; font-src https: data:; media-src https:; frame-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'"
+      )
+      .type('html')
+      .send(sanitizeSandboxHtml(html, site.url));
+  } catch {
+    res.status(502).send('<h1>Sandbox fetch failed</h1><p>The public page could not be loaded right now.</p>');
+  }
+});
 app.get(/.*/, (_req, res) => {
   res.sendFile(join(__dirname, '..', 'dist', 'index.html'));
 });
@@ -62,6 +104,14 @@ function createRoom(hostId) {
     systemTimer: null,
     round: 1,
     lastResult: null,
+    sandbox: {
+      siteId: SAFE_SITES[0].id,
+      url: SAFE_SITES[0].url,
+      title: SAFE_SITES[0].title,
+      scrollY: 0,
+      controllerId: null,
+      controlExpiresAt: null
+    },
     chat: [],
     createdAt: Date.now()
   };
@@ -72,6 +122,7 @@ function createRoom(hostId) {
 }
 
 function publicRoom(room) {
+  expireControl(room);
   const voteCounts = ACTIONS.reduce((acc, action) => {
     acc[action.id] = 0;
     return acc;
@@ -87,6 +138,11 @@ function publicRoom(room) {
     voteEndsAt: room.voteEndsAt,
     round: room.round,
     lastResult: room.lastResult,
+    safeSites: SAFE_SITES,
+    sandbox: {
+      ...room.sandbox,
+      controllerName: room.sandbox.controllerId ? room.users.get(room.sandbox.controllerId)?.name || 'Controller' : null
+    },
     chat: room.chat.slice(-60)
   };
 }
@@ -151,6 +207,56 @@ function cleanup(room) {
   rooms.delete(room.code);
 }
 
+function isHost(room, userId) {
+  return room.hostId === userId;
+}
+
+function canControlSandbox(room, userId) {
+  expireControl(room);
+  return isHost(room, userId) || room.sandbox.controllerId === userId;
+}
+
+function expireControl(room) {
+  if (room.sandbox.controlExpiresAt && room.sandbox.controlExpiresAt <= Date.now()) {
+    room.sandbox.controllerId = null;
+    room.sandbox.controlExpiresAt = null;
+  }
+}
+
+function safeSiteFor(urlOrId) {
+  const requested = String(urlOrId || '').trim();
+  return SAFE_SITES.find((site) => site.id === requested || site.url === requested);
+}
+
+function sanitizeSandboxHtml(html, baseUrl) {
+  const withoutScripts = html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<form\b[^>]*>/gi, '<div data-blocked-form="true">')
+    .replace(/<\/form>/gi, '</div>')
+    .replace(/<meta[^>]+http-equiv=["']?refresh["']?[^>]*>/gi, '');
+  const base = `<base href="${baseUrl}">`;
+  const banner = `
+    <style>
+      body { padding-top: 52px !important; }
+      .crowd-chaos-sandbox-banner {
+        position: fixed; z-index: 2147483647; inset: 0 0 auto 0;
+        min-height: 42px; padding: 10px 14px;
+        color: #001018; background: linear-gradient(90deg, #39d3ff, #b352ff);
+        font: 700 14px system-ui, sans-serif;
+      }
+      .crowd-chaos-sandbox-banner small { opacity: .82; margin-left: 10px; }
+    </style>
+    <div class="crowd-chaos-sandbox-banner">
+      Crowd Chaos Safe Sandbox
+      <small>Scripts, forms, cookies, storage, and arbitrary navigation are blocked.</small>
+    </div>
+  `;
+  if (withoutScripts.match(/<head[^>]*>/i)) {
+    return withoutScripts.replace(/<head[^>]*>/i, (match) => `${match}${base}${banner}`);
+  }
+  return `<!doctype html><html><head>${base}${banner}</head><body>${withoutScripts}</body></html>`;
+}
+
 wss.on('connection', (ws) => {
   const userId = crypto.randomUUID();
   let currentRoom = null;
@@ -209,6 +315,55 @@ wss.on('connection', (ws) => {
         currentRoom.votes.set(userId, message.actionId);
         sync(currentRoom);
       }
+      return;
+    }
+
+    if (message.type === 'control:grant') {
+      if (!isHost(currentRoom, userId)) return;
+      const target = currentRoom.users.get(message.targetUserId);
+      if (!target || target.role !== 'crowd') return;
+      currentRoom.sandbox.controllerId = target.id;
+      currentRoom.sandbox.controlExpiresAt = Date.now() + 30000;
+      broadcast(currentRoom, {
+        type: 'system:event',
+        event: { label: `${target.name} received sandbox control for 30 seconds`, at: Date.now() }
+      });
+      sync(currentRoom);
+      return;
+    }
+
+    if (message.type === 'control:revoke') {
+      if (!isHost(currentRoom, userId)) return;
+      currentRoom.sandbox.controllerId = null;
+      currentRoom.sandbox.controlExpiresAt = null;
+      sync(currentRoom);
+      return;
+    }
+
+    if (message.type === 'sandbox:navigate') {
+      if (!canControlSandbox(currentRoom, userId)) return;
+      const site = safeSiteFor(message.siteId || message.url);
+      if (!site) {
+        send(ws, { type: 'error', message: 'That destination is outside the sandbox allowlist' });
+        return;
+      }
+      currentRoom.sandbox.siteId = site.id;
+      currentRoom.sandbox.url = site.url;
+      currentRoom.sandbox.title = site.title;
+      currentRoom.sandbox.scrollY = 0;
+      broadcast(currentRoom, {
+        type: 'system:event',
+        event: { label: `Sandbox navigated to ${site.title}`, at: Date.now() }
+      });
+      sync(currentRoom);
+      return;
+    }
+
+    if (message.type === 'sandbox:scroll') {
+      if (!canControlSandbox(currentRoom, userId)) return;
+      const delta = Math.max(-500, Math.min(500, Number(message.delta) || 0));
+      currentRoom.sandbox.scrollY = Math.max(0, Math.min(1800, currentRoom.sandbox.scrollY + delta));
+      sync(currentRoom);
       return;
     }
 

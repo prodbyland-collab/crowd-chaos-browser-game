@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowLeft,
@@ -7,6 +7,8 @@ import {
   Crown,
   Flame,
   Ghost,
+  Globe2,
+  Hand,
   Lock,
   MessageCircle,
   MonitorUp,
@@ -14,6 +16,7 @@ import {
   Plus,
   RadioTower,
   Send,
+  ShieldCheck,
   Sparkles,
   Timer,
   Users,
@@ -193,6 +196,22 @@ function App() {
     send('vote', { actionId });
   }
 
+  function grantControl(targetUserId) {
+    send('control:grant', { targetUserId });
+  }
+
+  function revokeControl() {
+    send('control:revoke');
+  }
+
+  function navigateSandbox(siteId) {
+    send('sandbox:navigate', { siteId });
+  }
+
+  function scrollSandbox(delta) {
+    send('sandbox:scroll', { delta });
+  }
+
   function submitChat(event) {
     event.preventDefault();
     send('chat', { text: chatText });
@@ -243,6 +262,16 @@ function App() {
       <section className="game-grid">
         <aside className="side glass">
           <RoomHeader room={room} role={role} me={me} connected={connected} />
+          <SandboxControl
+            room={room}
+            userId={userId}
+            role={role}
+            clock={clock}
+            grantControl={grantControl}
+            revokeControl={revokeControl}
+            navigateSandbox={navigateSandbox}
+            scrollSandbox={scrollSandbox}
+          />
           <VotePanel room={room} role={role} clock={clock} vote={vote} />
           <StorePanel />
         </aside>
@@ -260,6 +289,7 @@ function App() {
             cursor={cursor}
             popups={popups}
             role={role}
+            sandbox={room.sandbox}
           />
         </section>
 
@@ -280,9 +310,72 @@ function RoomHeader({ room, role, me, connected }) {
       </div>
       <div className="user-stack">
         {room.users.map((user) => (
-          <span key={user.id} className={user.role}>{user.role === 'player' ? 'Host' : 'Crowd'} · {user.name}</span>
+          <span key={user.id} className={user.role}>{user.role === 'player' ? 'Host' : 'Crowd'} - {user.name}</span>
         ))}
       </div>
+    </div>
+  );
+}
+
+function SandboxControl({ room, userId, role, clock, grantControl, revokeControl, navigateSandbox, scrollSandbox }) {
+  const controller = room.sandbox?.controllerId;
+  const isHost = role === 'player';
+  const hasControl = isHost || controller === userId;
+  const controlSeconds = room.sandbox?.controlExpiresAt
+    ? Math.max(0, Math.ceil((room.sandbox.controlExpiresAt - clock) / 1000))
+    : 0;
+  const crowd = room.users.filter((user) => user.role === 'crowd');
+
+  return (
+    <div className="sandbox-panel">
+      <div className="panel-title"><ShieldCheck size={18} /> Safe sandbox</div>
+      <p className="microcopy">Public allowlist only. No personal browser, cookies, forms, scripts, or saved sessions.</p>
+
+      <div className="control-status">
+        <Globe2 size={16} />
+        <span>{room.sandbox?.title || 'Example Domain'}</span>
+      </div>
+
+      {isHost && (
+        <div className="grant-list">
+          {crowd.length === 0 && <small>Waiting for crowd users to join.</small>}
+          {crowd.map((user) => (
+            <button key={user.id} onClick={() => grantControl(user.id)}>
+              <Hand size={15} />
+              Give {user.name} control
+            </button>
+          ))}
+          {controller && (
+            <button className="danger" onClick={revokeControl}>
+              <X size={15} /> Revoke control
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="sandbox-actions">
+        <select
+          value={room.sandbox?.siteId || 'example'}
+          onChange={(event) => navigateSandbox(event.target.value)}
+          disabled={!hasControl}
+        >
+          {room.safeSites.map((site) => (
+            <option key={site.id} value={site.id}>{site.title}</option>
+          ))}
+        </select>
+        <div className="scroll-controls">
+          <button onClick={() => scrollSandbox(-360)} disabled={!hasControl}>Scroll up</button>
+          <button onClick={() => scrollSandbox(360)} disabled={!hasControl}>Scroll down</button>
+        </div>
+      </div>
+
+      <small className="control-note">
+        {controller
+          ? `${room.sandbox.controllerName} controls the sandbox for ${controlSeconds}s.`
+          : isHost
+            ? 'Host can browse or grant a 30 second control pass.'
+            : 'Ask the host for a sandbox control pass.'}
+      </small>
     </div>
   );
 }
@@ -292,7 +385,7 @@ function VotePanel({ room, role, clock, vote }) {
   const total = Object.values(room.voteCounts).reduce((sum, count) => sum + count, 0) || 1;
   return (
     <div className="vote-panel">
-      <div className="panel-title"><Timer size={18} /> Round {room.round} · {secondsLeft}s</div>
+      <div className="panel-title"><Timer size={18} /> Round {room.round} - {secondsLeft}s</div>
       <div className="action-list">
         {room.actions.map((action) => {
           const count = room.voteCounts[action.id] || 0;
@@ -309,7 +402,7 @@ function VotePanel({ room, role, clock, vote }) {
   );
 }
 
-function FakeBrowser({ tabs, activeTab, setActiveTab, closeActiveTab, urlValue, setUrlValue, scrollY, cursor, popups, role }) {
+function FakeBrowser({ tabs, activeTab, setActiveTab, closeActiveTab, urlValue, setUrlValue, scrollY, cursor, popups, role, sandbox }) {
   const active = tabs.find((tab) => tab.id === activeTab) || tabs[0];
   const cards = useMemo(() => [
     ['LIVE SIGNAL', 'Crowd sentiment is unstable. Democracy is currently touching the scroll wheel.'],
@@ -327,7 +420,7 @@ function FakeBrowser({ tabs, activeTab, setActiveTab, closeActiveTab, urlValue, 
         <button><ArrowRight size={16} /></button>
         <div className="url-field">
           <Lock size={14} />
-          <input value={urlValue} onChange={(event) => setUrlValue(event.target.value)} />
+          <input value={sandbox?.url || urlValue} onChange={(event) => setUrlValue(event.target.value)} readOnly={Boolean(sandbox?.url)} />
         </div>
         <button><Plus size={16} /></button>
       </div>
@@ -342,9 +435,20 @@ function FakeBrowser({ tabs, activeTab, setActiveTab, closeActiveTab, urlValue, 
       </div>
       <div className="viewport">
         <MousePointer2 className="cursor" style={{ left: `${cursor.x}%`, top: `${cursor.y}%` }} />
+        <div className="sandbox-frame-shell" style={{ transform: `translateY(-${sandbox?.scrollY || 0}px)` }}>
+          <iframe
+            title="Safe sandbox browser"
+            src={`/sandbox?site=${encodeURIComponent(sandbox?.siteId || 'example')}`}
+            sandbox=""
+          />
+        </div>
+        <div className="sandbox-overlay">
+          <ShieldCheck size={15} />
+          <span>Safe sandbox: allowlisted public pages, scripts and forms blocked</span>
+        </div>
         <div className="page" style={{ transform: `translateY(-${scrollY}px)` }}>
           <header className="page-hero">
-            <p>SIMULATED TAB · {active.url}</p>
+            <p>SAFE SANDBOX - {sandbox?.url || active.url}</p>
             <h2>{active.title}</h2>
             <div className="hero-meter"><span /></div>
           </header>
