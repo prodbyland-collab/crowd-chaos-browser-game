@@ -45,3 +45,10 @@ npm start
 ```
 
 The Node server serves the built React app and WebSocket endpoint from the same port.
+
+For hosts that separate build and start commands, use:
+
+- Build command: `npm install && npm run build`
+- Start command: `npm start`
+
+If your host only runs `npm install` before `npm start`, the `postinstall` script also creates the `dist` build automatically.

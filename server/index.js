@@ -1,12 +1,15 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
+import { existsSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 const VOTE_SECONDS = 8;
+const distPath = join(__dirname, '..', 'dist');
+const indexPath = join(distPath, 'index.html');
 
 const ACTIONS = [
   { id: 'scroll-down', label: 'Scroll down' },
@@ -52,7 +55,7 @@ const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-app.use(express.static(join(__dirname, '..', 'dist')));
+app.use(express.static(distPath));
 app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
 app.get('/sandbox', async (req, res) => {
   const site = safeSiteFor(req.query.site);
@@ -88,7 +91,17 @@ app.get('/sandbox', async (req, res) => {
   }
 });
 app.get(/.*/, (_req, res) => {
-  res.sendFile(join(__dirname, '..', 'dist', 'index.html'));
+  if (!existsSync(indexPath)) {
+    res.status(503).type('html').send(`
+      <main style="font-family: system-ui, sans-serif; padding: 32px; line-height: 1.5">
+        <h1>Client build missing</h1>
+        <p>The server is running, but <code>dist/index.html</code> was not found.</p>
+        <p>Run <code>npm run build</code> before <code>npm start</code>, or configure your host's build command to <code>npm install && npm run build</code>.</p>
+      </main>
+    `);
+    return;
+  }
+  res.sendFile(indexPath);
 });
 
 function roomCode() {
